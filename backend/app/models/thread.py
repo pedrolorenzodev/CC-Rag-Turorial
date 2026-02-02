@@ -18,6 +18,8 @@ class ThreadUpdate(ThreadBase):
 class Thread(ThreadBase):
     id: str
     user_id: str
+    # Deprecated: Was used for Responses API conversation continuity.
+    # Module 2+ manages chat history directly via messages table.
     openai_thread_id: Optional[str] = None
     vector_store_id: Optional[str] = None
     created_at: datetime

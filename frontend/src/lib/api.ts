@@ -33,6 +33,15 @@ export interface Message {
   created_at: string
 }
 
+export interface Document {
+  id: string
+  filename: string
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  error_message: string | null
+  chunk_count: number
+  created_at: string
+}
+
 export const api = {
   async listThreads(): Promise<Thread[]> {
     const headers = await getAuthHeaders()
@@ -85,5 +94,64 @@ export const api = {
     if (!response.ok) throw new Error('Failed to send message')
     if (!response.body) throw new Error('No response body')
     return response.body.getReader()
+  },
+
+  // Document APIs
+  async listDocuments(): Promise<Document[]> {
+    const headers = await getAuthHeaders()
+    const response = await fetch(`${API_URL}/api/documents`, { headers })
+    if (!response.ok) throw new Error('Failed to fetch documents')
+    return response.json()
+  },
+
+  async uploadDocument(file: File): Promise<Document> {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.access_token) {
+      throw new Error('Not authenticated')
+    }
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const response = await fetch(`${API_URL}/api/documents/upload`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: formData,
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }))
+      throw new Error(error.detail || 'Failed to upload document')
+    }
+    return response.json()
+  },
+
+  async getDocument(documentId: string): Promise<Document> {
+    const headers = await getAuthHeaders()
+    const response = await fetch(`${API_URL}/api/documents/${documentId}`, { headers })
+    if (!response.ok) throw new Error('Failed to fetch document')
+    return response.json()
+  },
+
+  async deleteDocument(documentId: string): Promise<void> {
+    const headers = await getAuthHeaders()
+    const response = await fetch(`${API_URL}/api/documents/${documentId}`, {
+      method: 'DELETE',
+      headers,
+    })
+    if (!response.ok) throw new Error('Failed to delete document')
+  },
+
+  async processDocument(documentId: string): Promise<void> {
+    const headers = await getAuthHeaders()
+    const response = await fetch(`${API_URL}/api/documents/${documentId}/process`, {
+      method: 'POST',
+      headers,
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Processing failed' }))
+      throw new Error(error.detail || 'Failed to process document')
+    }
   },
 }

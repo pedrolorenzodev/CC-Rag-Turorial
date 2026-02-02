@@ -1,5 +1,4 @@
 import { useState, useCallback } from 'react'
-import { MainLayout } from '@/layouts/MainLayout'
 import { ThreadList } from '@/components/chat/ThreadList'
 import { ChatContainer } from '@/components/chat/ChatContainer'
 import { useThreads } from '@/hooks/useThreads'
@@ -31,20 +30,29 @@ export function ChatPage() {
     [deleteThread, activeThreadId]
   )
 
-  const sidebar = (
-    <ThreadList
-      threads={threads}
-      activeThreadId={activeThreadId}
-      onSelectThread={setActiveThreadId}
-      onDeleteThread={handleDeleteThread}
-      onNewThread={handleNewThread}
-      loading={loading}
-    />
-  )
-
   return (
-    <MainLayout sidebar={sidebar}>
-      <ChatContainer threadId={activeThreadId} />
-    </MainLayout>
+    <div className="flex-1 flex overflow-hidden">
+      {/* Thread sidebar */}
+      <aside className="w-64 border-r bg-background/50 flex flex-col">
+        <div className="p-4 border-b">
+          <h2 className="font-semibold">Conversations</h2>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          <ThreadList
+            threads={threads}
+            activeThreadId={activeThreadId}
+            onSelectThread={setActiveThreadId}
+            onDeleteThread={handleDeleteThread}
+            onNewThread={handleNewThread}
+            loading={loading}
+          />
+        </div>
+      </aside>
+
+      {/* Chat area */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <ChatContainer threadId={activeThreadId} />
+      </div>
+    </div>
   )
 }

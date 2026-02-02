@@ -1,11 +1,16 @@
 import os
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel
 from supabase import create_client
 
 from app.middleware.auth import get_current_user, User
-from app.services.openai_service import stream_response
+from app.services.llm import stream_chat, ChatMessage
+from app.services.retrieval import retrieve_context
+from app.services.retrieval.search import format_context_for_prompt
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/threads", tags=["chat"])
 
@@ -31,6 +36,7 @@ async def chat(
 ):
     """
     Send a message and stream the AI response via SSE.
+    Uses RAG to retrieve relevant context from user's documents.
     """
     client = get_supabase_client()
 
@@ -46,11 +52,6 @@ async def chat(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found"
         )
-
-    thread = thread_response.data[0]
-
-    # Get vector store ID from thread or use default
-    vector_store_id = thread.get("vector_store_id") or os.getenv("DEFAULT_VECTOR_STORE_ID")
 
     # Save user message
     client.table("messages").insert(
@@ -72,23 +73,40 @@ async def chat(
     )
     messages = messages_response.data
 
+    # Convert to ChatMessage objects
+    chat_messages = [
+        ChatMessage(role=m["role"], content=m["content"])
+        for m in messages
+    ]
+
+    # Retrieve relevant context from user's documents
+    context = None
+    try:
+        logger.info(f"Retrieving context for user_id={user.id}, query={request.content[:50]}...")
+        chunks = retrieve_context(
+            query=request.content,
+            user_id=user.id,
+            match_count=5,
+            similarity_threshold=0.3,
+        )
+        logger.info(f"Retrieved {len(chunks)} chunks")
+        context = format_context_for_prompt(chunks)
+        logger.info(f"Context length: {len(context) if context else 0} chars")
+    except Exception as e:
+        logger.error(f"Retrieval failed: {e}", exc_info=True)
+        # If retrieval fails, continue without context
+        pass
+
     async def generate():
         full_response = ""
-        response_id = None
+        logger.info(f"Starting stream_chat with context={context is not None}, context_len={len(context) if context else 0}")
 
         try:
-            async for chunk, rid in stream_response(
-                messages=messages,
-                previous_response_id=thread.get("openai_thread_id"),
-                vector_store_id=vector_store_id,
-            ):
-                if chunk:
-                    full_response += chunk
-                    # Encode newlines for SSE transmission (SSE uses \n as delimiter)
-                    encoded_chunk = chunk.replace("\n", "\\n").replace("\r", "\\r")
-                    yield {"event": "message", "data": encoded_chunk}
-                if rid:
-                    response_id = rid
+            for chunk in stream_chat(messages=chat_messages, context=context):
+                full_response += chunk
+                # Encode newlines for SSE transmission (SSE uses \n as delimiter)
+                encoded_chunk = chunk.replace("\n", "\\n").replace("\r", "\\r")
+                yield {"event": "message", "data": encoded_chunk}
 
             # Save assistant message
             client.table("messages").insert(
@@ -97,22 +115,15 @@ async def chat(
                     "user_id": user.id,
                     "role": "assistant",
                     "content": full_response,
-                    "metadata": {"response_id": response_id} if response_id else {},
                 }
             ).execute()
 
-            # Update thread with OpenAI response ID for conversation continuity
-            if response_id:
-                client.table("threads").update(
-                    {"openai_thread_id": response_id}
-                ).eq("id", thread_id).execute()
-
-                # Update thread title if it's the first message
-                if len(messages) == 1:
-                    title = request.content[:50] + ("..." if len(request.content) > 50 else "")
-                    client.table("threads").update({"title": title}).eq(
-                        "id", thread_id
-                    ).execute()
+            # Update thread title if it's the first message
+            if len(messages) == 1:
+                title = request.content[:50] + ("..." if len(request.content) > 50 else "")
+                client.table("threads").update({"title": title}).eq(
+                    "id", thread_id
+                ).execute()
 
             yield {"event": "done", "data": ""}
 
