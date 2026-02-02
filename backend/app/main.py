@@ -1,4 +1,5 @@
 import logging
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -15,9 +16,19 @@ logging.basicConfig(
 
 app = FastAPI(title="RAG App API", version="1.0.0")
 
+# CORS configuration - add your frontend URLs here
+cors_origins = [
+    "http://localhost:5173",  # Local development
+]
+
+# Add production frontend URL from environment variable
+frontend_url = os.getenv("FRONTEND_URL")
+if frontend_url:
+    cors_origins.append(frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
